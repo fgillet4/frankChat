@@ -9,10 +9,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Input, Static, ListView, ListItem, Label
+from textual.containers import Container, Vertical, ScrollableContainer
+from textual.widgets import Header, Footer, Input, Static, TextArea
 from textual.binding import Binding
-from textual.reactive import reactive
 
 
 CONFIG_DIR = Path.home() / ".frankchat"
@@ -22,7 +21,6 @@ PUBLIC_KEY_FILE = CONFIG_DIR / "public_key.pem"
 CONTACTS_FILE = CONFIG_DIR / "contacts.json"
 
 DEFAULT_PORT = 5555
-DISCOVERY_PORT = 5556
 
 
 class CryptoManager:
@@ -139,47 +137,28 @@ class ChatProtocol(asyncio.Protocol):
             if msg["type"] == "hello":
                 self.peer_name = msg["name"]
                 self.crypto.add_peer_key(self.peer_name, msg["public_key"])
-                self.app.call_from_thread(self.app.add_system_message, f"{self.peer_name} connected")
+                self.app.call_from_thread(self.app.log_message, f"* {self.peer_name} connected", "yellow")
             elif msg["type"] == "message":
-                decrypted = self.crypto.decrypt(msg["content"])
-                self.app.call_from_thread(self.app.add_message, self.peer_name, decrypted)
+                decrypted = self.crypto.decrypt(bytes.fromhex(msg["content"]))
+                self.app.call_from_thread(self.app.log_message, f"{self.peer_name}: {decrypted}", "cyan")
         except Exception as e:
             pass
     
     def connection_lost(self, exc):
         if self.peer_name:
-            self.app.call_from_thread(self.app.add_system_message, f"{self.peer_name} disconnected")
-
-
-class MessageDisplay(Static):
-    pass
-
-
-class BuddyList(ListView):
-    pass
+            self.app.call_from_thread(self.app.log_message, f"* {self.peer_name} disconnected", "yellow")
 
 
 class FrankChat(App):
     CSS = """
     Screen {
-        layout: horizontal;
+        layout: vertical;
     }
     
-    #sidebar {
-        width: 25;
-        background: $panel;
-        border-right: solid $primary;
-    }
-    
-    #main {
-        width: 1fr;
-    }
-    
-    #messages {
+    #chat-log {
         height: 1fr;
-        overflow-y: auto;
+        border: solid $primary;
         background: $surface;
-        padding: 1;
     }
     
     #input-container {
@@ -190,44 +169,12 @@ class FrankChat(App):
     
     Input {
         width: 100%;
-    }
-    
-    .message {
-        margin: 1 0;
-    }
-    
-    .message-sender {
-        color: $accent;
-        text-style: bold;
-    }
-    
-    .message-self {
-        color: $success;
-    }
-    
-    .message-system {
-        color: $warning;
-        text-style: italic;
-    }
-    
-    BuddyList {
-        height: 1fr;
-    }
-    
-    ListItem {
-        padding: 1;
-    }
-    
-    #status {
         height: 3;
-        background: $panel;
-        padding: 1;
     }
     """
     
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
-        Binding("ctrl+a", "add_buddy", "Add Buddy"),
     ]
     
     def __init__(self):
@@ -241,25 +188,20 @@ class FrankChat(App):
     
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
-            with Vertical(id="sidebar"):
-                yield Label(f"[b]FrankChat[/b]\n{self.username}", id="status")
-                yield BuddyList(id="buddy-list")
-            with Vertical(id="main"):
-                yield Container(id="messages")
-                with Container(id="input-container"):
-                    yield Input(placeholder="Type a message...", id="message-input")
+        yield TextArea(id="chat-log", read_only=True)
+        with Container(id="input-container"):
+            yield Input(placeholder="Type /add name ip, /chat name, or message...", id="message-input")
         yield Footer()
     
     async def on_mount(self):
-        self.messages_container = self.query_one("#messages", Container)
+        self.chat_log = self.query_one("#chat-log", TextArea)
         self.message_input = self.query_one("#message-input", Input)
-        self.buddy_list = self.query_one("#buddy-list", BuddyList)
         
         await self._start_server()
-        self._update_buddy_list()
-        self.add_system_message(f"Listening on port {DEFAULT_PORT}")
-        self.add_system_message(f"Your computer: {self.username}")
+        self.log_message(f"FrankChat - {self.username}")
+        self.log_message(f"Listening on port {DEFAULT_PORT}")
+        self.log_message(f"Commands: /add <name> <ip>, /chat <name>, /list")
+        self.log_message("")
     
     async def _start_server(self):
         loop = asyncio.get_event_loop()
@@ -269,11 +211,6 @@ class FrankChat(App):
             DEFAULT_PORT
         )
     
-    def _update_buddy_list(self):
-        self.buddy_list.clear()
-        for contact in self.contacts.list_contacts():
-            self.buddy_list.append(ListItem(Label(f"[cyan]{contact}[/cyan]")))
-    
     def on_connection(self, protocol):
         hello_msg = json.dumps({
             "type": "hello",
@@ -282,43 +219,24 @@ class FrankChat(App):
         })
         protocol.transport.write(hello_msg.encode())
     
-    def add_system_message(self, text):
-        timestamp = datetime.now().strftime("%H:%M")
-        msg = Static(f"[dim]{timestamp}[/dim] [yellow]* {text}[/yellow]", classes="message message-system")
-        self.messages_container.mount(msg)
-        self.messages_container.scroll_end(animate=False)
-    
-    def add_message(self, sender, text):
-        timestamp = datetime.now().strftime("%H:%M")
-        msg = Static(
-            f"[dim]{timestamp}[/dim] [cyan]{sender}:[/cyan] {text}",
-            classes="message"
-        )
-        self.messages_container.mount(msg)
-        self.messages_container.scroll_end(animate=False)
-    
-    def add_self_message(self, text):
-        timestamp = datetime.now().strftime("%H:%M")
-        msg = Static(
-            f"[dim]{timestamp}[/dim] [green]{self.username}:[/green] {text}",
-            classes="message message-self"
-        )
-        self.messages_container.mount(msg)
-        self.messages_container.scroll_end(animate=False)
-    
-    async def on_list_view_selected(self, event: ListView.Selected):
-        label = event.item.query_one(Label)
-        contact_name = label.renderable.plain.strip()
-        await self._connect_to_buddy(contact_name)
+    def log_message(self, text, style=""):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        current_text = self.chat_log.text
+        if current_text:
+            self.chat_log.text = f"{current_text}\n[{timestamp}] {text}"
+        else:
+            self.chat_log.text = f"[{timestamp}] {text}"
+        self.chat_log.scroll_end(animate=False)
     
     async def _connect_to_buddy(self, contact_name):
         contact = self.contacts.get_contact(contact_name)
         if not contact:
+            self.log_message(f"Contact '{contact_name}' not found. Use /add first", "red")
             return
         
         if contact_name in self.connections:
             self.current_chat = contact_name
-            self.add_system_message(f"Chatting with {contact_name}")
+            self.log_message(f"Now chatting with {contact_name}", "green")
             return
         
         try:
@@ -337,8 +255,9 @@ class FrankChat(App):
                 "public_key": self.crypto.get_public_key_pem()
             })
             transport.write(hello_msg.encode())
+            self.log_message(f"Connected to {contact_name}", "green")
         except Exception as e:
-            self.add_system_message(f"Failed to connect to {contact_name}")
+            self.log_message(f"Failed to connect to {contact_name}: {e}", "red")
     
     async def on_input_submitted(self, event: Input.Submitted):
         message = event.value.strip()
@@ -350,10 +269,27 @@ class FrankChat(App):
             if len(parts) == 3:
                 name, host = parts[1], parts[2]
                 self.contacts.add_contact(name, host)
-                self._update_buddy_list()
-                self.add_system_message(f"Added {name} ({host})")
+                self.log_message(f"Added {name} ({host})", "green")
             else:
-                self.add_system_message("Usage: /add <name> <host>")
+                self.log_message("Usage: /add <name> <host>", "red")
+        
+        elif message.startswith("/chat "):
+            parts = message.split()
+            if len(parts) == 2:
+                await self._connect_to_buddy(parts[1])
+            else:
+                self.log_message("Usage: /chat <name>", "red")
+        
+        elif message == "/list":
+            contacts = self.contacts.list_contacts()
+            if contacts:
+                self.log_message("Contacts:", "cyan")
+                for c in contacts:
+                    status = "online" if c in self.connections else "offline"
+                    self.log_message(f"  - {c} ({status})", "dim")
+            else:
+                self.log_message("No contacts. Use /add <name> <ip>", "dim")
+        
         elif self.current_chat and self.current_chat in self.connections:
             protocol = self.connections[self.current_chat]
             encrypted = self.crypto.encrypt(self.current_chat, message)
@@ -362,15 +298,12 @@ class FrankChat(App):
                 "content": encrypted.hex()
             })
             protocol.transport.write(msg.encode())
-            self.add_self_message(message)
+            self.log_message(f"{self.username}: {message}", "green")
+        
         else:
-            self.add_system_message("Select a buddy first or use /add <name> <host>")
+            self.log_message("Use /chat <name> to start chatting or /add <name> <ip> to add contact", "yellow")
         
         self.message_input.value = ""
-    
-    def action_add_buddy(self):
-        self.add_system_message("Type: /add <name> <ip-address>")
-        self.message_input.focus()
     
     async def on_unmount(self):
         if self.server:
