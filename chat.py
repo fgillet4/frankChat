@@ -23,6 +23,18 @@ CONTACTS_FILE = CONFIG_DIR / "contacts.json"
 DEFAULT_PORT = 5555
 
 
+def find_available_port(start_port=5555, max_attempts=10):
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.bind(('0.0.0.0', port))
+            test_sock.close()
+            return port
+        except OSError:
+            continue
+    return start_port
+
+
 class CryptoManager:
     def __init__(self):
         self.private_key = None
@@ -185,6 +197,7 @@ class FrankChat(App):
         self.connections = {}
         self.server = None
         self.current_chat = None
+        self.port = find_available_port(DEFAULT_PORT)
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -199,8 +212,8 @@ class FrankChat(App):
         
         await self._start_server()
         self.log_message(f"FrankChat - {self.username}")
-        self.log_message(f"Listening on port {DEFAULT_PORT}")
-        self.log_message(f"Commands: /add <name> <ip>, /chat <name>, /list")
+        self.log_message(f"Listening on port {self.port}")
+        self.log_message(f"Commands: /add <name> <ip> [port], /chat <name>, /list")
         self.log_message("")
     
     async def _start_server(self):
@@ -208,7 +221,7 @@ class FrankChat(App):
         self.server = await loop.create_server(
             lambda: ChatProtocol(self, self.crypto),
             "0.0.0.0",
-            DEFAULT_PORT
+            self.port
         )
     
     def on_connection(self, protocol):
@@ -266,12 +279,13 @@ class FrankChat(App):
         
         if message.startswith("/add "):
             parts = message.split()
-            if len(parts) == 3:
+            if len(parts) >= 3:
                 name, host = parts[1], parts[2]
-                self.contacts.add_contact(name, host)
-                self.log_message(f"Added {name} ({host})", "green")
+                port = int(parts[3]) if len(parts) == 4 else DEFAULT_PORT
+                self.contacts.add_contact(name, host, port)
+                self.log_message(f"Added {name} ({host}:{port})", "green")
             else:
-                self.log_message("Usage: /add <name> <host>", "red")
+                self.log_message("Usage: /add <name> <host> [port]", "red")
         
         elif message.startswith("/chat "):
             parts = message.split()
