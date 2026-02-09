@@ -307,7 +307,8 @@ class FrankChat(App):
         self.messages_container.scroll_end(animate=False)
     
     async def on_list_view_selected(self, event: ListView.Selected):
-        contact_name = event.item.children[0].renderable.plain.strip()
+        label = event.item.query_one(Label)
+        contact_name = label.renderable.plain.strip()
         await self._connect_to_buddy(contact_name)
     
     async def _connect_to_buddy(self, contact_name):
