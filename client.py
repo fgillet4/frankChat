@@ -3,8 +3,12 @@ import asyncio
 import json
 import socket
 import re
+import base64
 from datetime import datetime
 from pathlib import Path
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
 
 from textual.app import App, ComposeResult
 from textual.containers import Container
@@ -14,6 +18,7 @@ from textual.binding import Binding
 
 CONFIG_FILE = Path(__file__).parent / "config.json"
 TRIGGERS_FILE = Path(__file__).parent / "triggers.json"
+KEY_FILE = Path(__file__).parent / ".chat_key"
 
 
 class GroupChatClient(App):
@@ -54,6 +59,7 @@ class GroupChatClient(App):
         self.writer = None
         self.users = []
         self.triggers = self.load_triggers()
+        self.cipher = self._load_cipher()
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -108,7 +114,8 @@ class GroupChatClient(App):
                     
                     if msg["type"] == "message":
                         sender = msg["sender"]
-                        content = msg["content"]
+                        encrypted_content = msg["content"]
+                        content = self._decrypt(encrypted_content)
                         self.log_message(f"{sender}: {content}")
                         
                         if sender != self.username:
@@ -146,9 +153,10 @@ class GroupChatClient(App):
         if message == "/users":
             self.log_message(f"Users online: {', '.join(self.users)}")
         elif self.writer:
+            encrypted = self._encrypt(message)
             msg = json.dumps({
                 "type": "message",
-                "content": message
+                "content": encrypted
             })
             try:
                 self.writer.write(msg.encode())
@@ -157,6 +165,32 @@ class GroupChatClient(App):
                 self.log_message(f"Failed to send: {e}")
         
         self.message_input.value = ""
+    
+    def _load_cipher(self):
+        if KEY_FILE.exists():
+            with open(KEY_FILE, 'rb') as f:
+                key = f.read()
+        else:
+            key = Fernet.generate_key()
+            with open(KEY_FILE, 'wb') as f:
+                f.write(key)
+            KEY_FILE.chmod(0o600)
+        return Fernet(key)
+    
+    def _encrypt(self, message):
+        try:
+            encrypted = self.cipher.encrypt(message.encode())
+            return base64.b64encode(encrypted).decode()
+        except:
+            return message
+    
+    def _decrypt(self, encrypted_message):
+        try:
+            decoded = base64.b64decode(encrypted_message.encode())
+            decrypted = self.cipher.decrypt(decoded)
+            return decrypted.decode()
+        except:
+            return encrypted_message
     
     def load_triggers(self):
         if TRIGGERS_FILE.exists():
@@ -178,9 +212,10 @@ class GroupChatClient(App):
                 response = trigger["response"]
                 await asyncio.sleep(0.5)
                 
+                encrypted = self._encrypt(response)
                 msg = json.dumps({
                     "type": "message",
-                    "content": response
+                    "content": encrypted
                 })
                 try:
                     self.writer.write(msg.encode())
