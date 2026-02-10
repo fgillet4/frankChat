@@ -201,7 +201,7 @@ class FrankChat(App):
     
     def compose(self) -> ComposeResult:
         yield Header()
-        yield TextArea(id="chat-log", read_only=True)
+        yield TextArea(id="chat-log", read_only=True, show_line_numbers=False)
         with Container(id="input-container"):
             yield Input(placeholder="Type /add name ip, /chat name, or message...", id="message-input")
         yield Footer()
@@ -209,11 +209,18 @@ class FrankChat(App):
     async def on_mount(self):
         self.chat_log = self.query_one("#chat-log", TextArea)
         self.message_input = self.query_one("#message-input", Input)
+        self.message_input.focus()
         
         await self._start_server()
-        self.log_message(f"FrankChat - {self.username}")
-        self.log_message(f"Listening on port {self.port}")
-        self.log_message(f"Commands: /add <name> <ip> [port], /chat <name>, /list")
+        self.log_message(f"=== FrankChat ===")
+        self.log_message(f"Computer: {self.username}")
+        self.log_message(f"Port: {self.port}")
+        self.log_message("")
+        self.log_message("Commands:")
+        self.log_message("  /add <name> <ip> [port] - Add contact")
+        self.log_message("  /chat <name> - Start chat")
+        self.log_message("  /list - Show contacts")
+        self.log_message("  Ctrl+Q - Quit")
         self.log_message("")
     
     async def _start_server(self):
