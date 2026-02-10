@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import socket
+import subprocess
 from pathlib import Path
 
 DEVICES_FILE = Path(__file__).parent / "devices.json"
@@ -58,14 +59,16 @@ def main():
         if default_server and default_server in devices:
             server_ip = devices[default_server]
             print(f"Connecting to {default_server} at {server_ip}:{port}...")
-            os.execvp("python3", ["python3", str(CLIENT_SCRIPT), server_ip, str(port), my_name])
+            subprocess.run([sys.executable, str(CLIENT_SCRIPT), server_ip, str(port), my_name])
+            sys.exit(0)
         else:
             print("Error: No default_server set in devices.json")
             sys.exit(1)
     
     elif command == "server":
         print(f"Starting server on port {port}...")
-        os.execvp("python3", ["python3", str(SERVER_SCRIPT), str(port)])
+        subprocess.run([sys.executable, str(SERVER_SCRIPT), str(port)])
+        sys.exit(0)
     
     else:
         target = None
@@ -78,10 +81,13 @@ def main():
             name, ip = target
             print(f"P2P chat with {name} at {ip}:{port}...")
             
-            with open(Path.home() / ".frankchat" / "contacts.json", "w") as f:
+            contacts_dir = Path.home() / ".frankchat"
+            contacts_dir.mkdir(exist_ok=True)
+            with open(contacts_dir / "contacts.json", "w") as f:
                 json.dump({name: {"host": ip, "port": port}}, f)
             
-            os.execvp("python3", ["python3", str(CHAT_SCRIPT)])
+            subprocess.run([sys.executable, str(CHAT_SCRIPT)])
+            sys.exit(0)
         else:
             print(f"Error: Unknown device '{command}'")
             print(f"Available: {', '.join([n for n in devices.keys() if n != my_name])}")
