@@ -1,0 +1,20 @@
+{
+  "triggers": [
+    {
+      "pattern": "hello everyone",
+      "response": "👋 Hello!",
+      "enabled": true
+    },
+    {
+      "pattern": "status",
+      "response": "✓ Online and ready",
+      "enabled": true
+    },
+    {
+      "pattern": "ping",
+      "response": "pong!",
+      "enabled": true
+    }
+  ],
+  "auto_respond": true
+}

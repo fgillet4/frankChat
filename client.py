@@ -2,6 +2,7 @@
 import asyncio
 import json
 import socket
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from textual.binding import Binding
 
 
 CONFIG_FILE = Path(__file__).parent / "config.json"
+TRIGGERS_FILE = Path(__file__).parent / "triggers.json"
 
 
 class GroupChatClient(App):
@@ -51,6 +53,7 @@ class GroupChatClient(App):
         self.reader = None
         self.writer = None
         self.users = []
+        self.triggers = self.load_triggers()
     
     def compose(self) -> ComposeResult:
         yield Header()
@@ -107,6 +110,9 @@ class GroupChatClient(App):
                         sender = msg["sender"]
                         content = msg["content"]
                         self.log_message(f"{sender}: {content}")
+                        
+                        if sender != self.username:
+                            await self.check_triggers(content)
                     
                     elif msg["type"] == "system":
                         self.log_message(f"* {msg['message']}")
@@ -151,6 +157,37 @@ class GroupChatClient(App):
                 self.log_message(f"Failed to send: {e}")
         
         self.message_input.value = ""
+    
+    def load_triggers(self):
+        if TRIGGERS_FILE.exists():
+            with open(TRIGGERS_FILE, 'r') as f:
+                return json.load(f)
+        return {"triggers": [], "auto_respond": False}
+    
+    async def check_triggers(self, message):
+        if not self.triggers.get("auto_respond"):
+            return
+        
+        message_lower = message.lower()
+        for trigger in self.triggers.get("triggers", []):
+            if not trigger.get("enabled"):
+                continue
+            
+            pattern = trigger["pattern"].lower()
+            if pattern in message_lower:
+                response = trigger["response"]
+                await asyncio.sleep(0.5)
+                
+                msg = json.dumps({
+                    "type": "message",
+                    "content": response
+                })
+                try:
+                    self.writer.write(msg.encode())
+                    await self.writer.drain()
+                except:
+                    pass
+                break
     
     def action_copy_mode(self):
         self.chat_log.focus()
