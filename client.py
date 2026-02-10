@@ -40,6 +40,7 @@ class GroupChatClient(App):
     
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+c", "copy_mode", "Copy Mode", show=False),
     ]
     
     def __init__(self, server_ip, server_port=5555, username=None):
@@ -53,9 +54,9 @@ class GroupChatClient(App):
     
     def compose(self) -> ComposeResult:
         yield Header()
-        yield TextArea(id="chat-log", read_only=True, show_line_numbers=False)
+        yield TextArea(id="chat-log", read_only=False, show_line_numbers=False)
         with Container(id="input-container"):
-            yield Input(placeholder="Type your message...", id="message-input")
+            yield Input(placeholder="Type your message... (Ctrl+C in chat to copy)", id="message-input")
         yield Footer()
     
     async def on_mount(self):
@@ -146,11 +147,13 @@ class GroupChatClient(App):
             try:
                 self.writer.write(msg.encode())
                 await self.writer.drain()
-                self.log_message(f"{self.username}: {message}")
             except Exception as e:
                 self.log_message(f"Failed to send: {e}")
         
         self.message_input.value = ""
+    
+    def action_copy_mode(self):
+        self.chat_log.focus()
     
     async def on_unmount(self):
         if self.writer:
