@@ -6,10 +6,17 @@ import socket
 import subprocess
 from pathlib import Path
 
-DEVICES_FILE = Path(__file__).parent / "devices.json"
-CLIENT_SCRIPT = Path(__file__).parent / "client.py"
-SERVER_SCRIPT = Path(__file__).parent / "server.py"
-CHAT_SCRIPT = Path(__file__).parent / "chat.py"
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEVICES_FILE = SCRIPT_DIR / "devices.json"
+CLIENT_SCRIPT = SCRIPT_DIR / "client.py"
+SERVER_SCRIPT = SCRIPT_DIR / "server.py"
+CHAT_SCRIPT = SCRIPT_DIR / "chat.py"
+VENV_PYTHON = SCRIPT_DIR / "venv" / "bin" / "python3"
+
+if VENV_PYTHON.exists():
+    PYTHON = str(VENV_PYTHON)
+else:
+    PYTHON = sys.executable
 
 
 def load_devices():
@@ -40,18 +47,24 @@ def main():
     my_name = get_my_name(config)
     
     if len(sys.argv) < 2:
-        print(f"FrankChat Quick Launcher - You are: {my_name}")
-        print("")
-        print("Usage:")
-        print("  frank group          - Join group chat")
-        print("  frank server         - Start group chat server")
-        print("  frank <device>       - P2P chat with device")
-        print("")
-        print("Available devices:")
-        for name, ip in devices.items():
-            if name != my_name:
-                print(f"  - {name} ({ip})")
-        sys.exit(0)
+        if default_server and default_server in devices:
+            server_ip = devices[default_server]
+            print(f"Auto-joining group chat on {default_server} ({server_ip}:{port})...")
+            subprocess.run([PYTHON, str(CLIENT_SCRIPT), server_ip, str(port), my_name])
+            sys.exit(0)
+        else:
+            print(f"FrankChat Quick Launcher - You are: {my_name}")
+            print("")
+            print("Usage:")
+            print("  frank group          - Join group chat")
+            print("  frank server         - Start group chat server")
+            print("  frank <device>       - P2P chat with device")
+            print("")
+            print("Available devices:")
+            for name, ip in devices.items():
+                if name != my_name:
+                    print(f"  - {name} ({ip})")
+            sys.exit(0)
     
     command = sys.argv[1].lower()
     
@@ -59,7 +72,7 @@ def main():
         if default_server and default_server in devices:
             server_ip = devices[default_server]
             print(f"Connecting to {default_server} at {server_ip}:{port}...")
-            subprocess.run([sys.executable, str(CLIENT_SCRIPT), server_ip, str(port), my_name])
+            subprocess.run([PYTHON, str(CLIENT_SCRIPT), server_ip, str(port), my_name])
             sys.exit(0)
         else:
             print("Error: No default_server set in devices.json")
@@ -67,7 +80,7 @@ def main():
     
     elif command == "server":
         print(f"Starting server on port {port}...")
-        subprocess.run([sys.executable, str(SERVER_SCRIPT), str(port)])
+        subprocess.run([PYTHON, str(SERVER_SCRIPT), str(port)])
         sys.exit(0)
     
     else:
@@ -86,7 +99,7 @@ def main():
             with open(contacts_dir / "contacts.json", "w") as f:
                 json.dump({name: {"host": ip, "port": port}}, f)
             
-            subprocess.run([sys.executable, str(CHAT_SCRIPT)])
+            subprocess.run([PYTHON, str(CHAT_SCRIPT)])
             sys.exit(0)
         else:
             print(f"Error: Unknown device '{command}'")
