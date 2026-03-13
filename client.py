@@ -4,6 +4,7 @@ import json
 import socket
 import re
 import base64
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from cryptography.fernet import Fernet
@@ -12,6 +13,16 @@ from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Header, Footer, Input, TextArea
 from textual.binding import Binding
+
+
+class PasteableInput(Input):
+    async def action_paste(self) -> None:
+        try:
+            text = subprocess.run(['pbpaste'], capture_output=True, text=True).stdout
+            text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', '')
+            self.insert_text_at_cursor(text)
+        except Exception:
+            pass
 
 
 CONFIG_FILE = Path(__file__).parent / "config.json"
@@ -46,6 +57,7 @@ class GroupChatClient(App):
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+c", "copy_mode", "Copy Mode", show=False),
+        Binding("ctrl+v", "paste_clipboard", "Paste", show=False),
     ]
     
     def __init__(self, server_ip, server_port=5555, username=None):
@@ -63,12 +75,12 @@ class GroupChatClient(App):
         yield Header()
         yield TextArea(id="chat-log", read_only=False, show_line_numbers=False)
         with Container(id="input-container"):
-            yield Input(placeholder="Type your message... (Ctrl+C in chat to copy)", id="message-input")
+            yield PasteableInput(placeholder="Type your message... (Ctrl+V to paste)", id="message-input")
         yield Footer()
     
     async def on_mount(self):
         self.chat_log = self.query_one("#chat-log", TextArea)
-        self.message_input = self.query_one("#message-input", Input)
+        self.message_input = self.query_one("#message-input", PasteableInput)
         self.message_input.focus()
         
         self.log_message(f"=== FrankChat Group ===")
@@ -88,7 +100,7 @@ class GroupChatClient(App):
                 "type": "join",
                 "name": self.username
             })
-            self.writer.write(join_msg.encode())
+            self.writer.write(join_msg.encode() + b'\n')
             await self.writer.drain()
             
             self.log_message("Connected to server!")
@@ -103,7 +115,7 @@ class GroupChatClient(App):
     async def receive_messages(self):
         try:
             while True:
-                data = await self.reader.read(4096)
+                data = await self.reader.readline()
                 if not data:
                     break
                 
@@ -157,7 +169,7 @@ class GroupChatClient(App):
                 "content": encrypted
             })
             try:
-                self.writer.write(msg.encode())
+                self.writer.write(msg.encode() + b'\n')
                 await self.writer.drain()
             except Exception as e:
                 self.log_message(f"Failed to send: {e}")
@@ -216,12 +228,21 @@ class GroupChatClient(App):
                     "content": encrypted
                 })
                 try:
-                    self.writer.write(msg.encode())
+                    self.writer.write(msg.encode() + b'\n')
                     await self.writer.drain()
                 except:
                     pass
                 break
     
+    def action_paste_clipboard(self) -> None:
+        try:
+            text = subprocess.run(['pbpaste'], capture_output=True, text=True).stdout
+            text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', '')
+            self.message_input.value += text
+            self.message_input.focus()
+        except Exception:
+            pass
+
     def action_copy_mode(self):
         self.chat_log.focus()
     

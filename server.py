@@ -32,7 +32,7 @@ class ChatServer:
         
         try:
             while True:
-                data = await reader.read(4096)
+                data = await reader.readline()
                 if not data:
                     break
                 
@@ -53,7 +53,7 @@ class ChatServer:
                             "type": "user_list",
                             "users": user_list
                         })
-                        writer.write(response.encode())
+                        writer.write(response.encode() + b'\n')
                         await writer.drain()
                     
                     elif msg["type"] == "message":
@@ -90,7 +90,7 @@ class ChatServer:
         for name, writer in self.clients.items():
             if name != exclude:
                 try:
-                    writer.write(msg_data)
+                    writer.write(msg_data + b'\n')
                     await writer.drain()
                 except:
                     dead_clients.append(name)

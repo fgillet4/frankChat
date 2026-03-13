@@ -2,6 +2,7 @@
 import asyncio
 import json
 import socket
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -12,6 +13,16 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical, ScrollableContainer
 from textual.widgets import Header, Footer, Input, Static, TextArea
 from textual.binding import Binding
+
+
+class PasteableInput(Input):
+    async def action_paste(self) -> None:
+        try:
+            text = subprocess.run(['pbpaste'], capture_output=True, text=True).stdout
+            text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', '')
+            self.insert_text_at_cursor(text)
+        except Exception:
+            pass
 
 
 CONFIG_DIR = Path.home() / ".frankchat"
@@ -81,30 +92,42 @@ class CryptoManager:
             public_key_pem.encode(), backend=default_backend()
         )
     
-    def encrypt(self, peer_id, message):
+    _RSA_CHUNK = 190  # max plaintext for RSA-2048 OAEP-SHA256
+
+    def encrypt(self, peer_id, message) -> str:
         if peer_id not in self.peer_keys:
-            return message.encode()
-        return self.peer_keys[peer_id].encrypt(
-            message.encode(),
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
-        )
-    
-    def decrypt(self, ciphertext):
-        try:
-            return self.private_key.decrypt(
-                ciphertext,
+            return message.encode().hex()
+        key = self.peer_keys[peer_id]
+        chunks = [message[i:i+self._RSA_CHUNK] for i in range(0, len(message), self._RSA_CHUNK)]
+        encrypted_hexes = []
+        for chunk in chunks:
+            enc = key.encrypt(
+                chunk.encode(),
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
                     label=None
                 )
-            ).decode()
+            )
+            encrypted_hexes.append(enc.hex())
+        return '|'.join(encrypted_hexes)
+
+    def decrypt(self, ciphertext_hex: str) -> str:
+        try:
+            parts = ciphertext_hex.split('|')
+            result = []
+            for part in parts:
+                result.append(self.private_key.decrypt(
+                    bytes.fromhex(part),
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                        algorithm=hashes.SHA256(),
+                        label=None
+                    )
+                ).decode())
+            return ''.join(result)
         except:
-            return ciphertext.decode()
+            return ciphertext_hex
 
 
 class ContactManager:
@@ -138,12 +161,20 @@ class ChatProtocol(asyncio.Protocol):
         self.crypto = crypto_manager
         self.transport = None
         self.peer_name = None
-    
+        self._buffer = b''
+
     def connection_made(self, transport):
         self.transport = transport
         self.app.call_from_thread(self.app.on_connection, self)
-    
+
     def data_received(self, data):
+        self._buffer += data
+        while b'\n' in self._buffer:
+            line, self._buffer = self._buffer.split(b'\n', 1)
+            if line:
+                self._process_line(line)
+
+    def _process_line(self, data):
         try:
             msg = json.loads(data.decode())
             if msg["type"] == "hello":
@@ -151,11 +182,11 @@ class ChatProtocol(asyncio.Protocol):
                 self.crypto.add_peer_key(self.peer_name, msg["public_key"])
                 self.app.call_from_thread(self.app.log_message, f"* {self.peer_name} connected", "yellow")
             elif msg["type"] == "message":
-                decrypted = self.crypto.decrypt(bytes.fromhex(msg["content"]))
+                decrypted = self.crypto.decrypt(msg["content"])
                 self.app.call_from_thread(self.app.log_message, f"{self.peer_name}: {decrypted}", "cyan")
-        except Exception as e:
+        except Exception:
             pass
-    
+
     def connection_lost(self, exc):
         if self.peer_name:
             self.app.call_from_thread(self.app.log_message, f"* {self.peer_name} disconnected", "yellow")
@@ -187,6 +218,7 @@ class FrankChat(App):
     
     BINDINGS = [
         Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+v", "paste_clipboard", "Paste", show=False),
     ]
     
     def __init__(self):
@@ -203,12 +235,12 @@ class FrankChat(App):
         yield Header()
         yield TextArea(id="chat-log", read_only=True, show_line_numbers=False)
         with Container(id="input-container"):
-            yield Input(placeholder="Type /add name ip, /chat name, or message...", id="message-input")
+            yield PasteableInput(placeholder="Type /add name ip, /chat name, or message... (Ctrl+V to paste)", id="message-input")
         yield Footer()
     
     async def on_mount(self):
         self.chat_log = self.query_one("#chat-log", TextArea)
-        self.message_input = self.query_one("#message-input", Input)
+        self.message_input = self.query_one("#message-input", PasteableInput)
         self.message_input.focus()
         
         await self._start_server()
@@ -237,7 +269,7 @@ class FrankChat(App):
             "name": self.username,
             "public_key": self.crypto.get_public_key_pem()
         })
-        protocol.transport.write(hello_msg.encode())
+        protocol.transport.write(hello_msg.encode() + b'\n')
     
     def log_message(self, text, style=""):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -274,7 +306,7 @@ class FrankChat(App):
                 "name": self.username,
                 "public_key": self.crypto.get_public_key_pem()
             })
-            transport.write(hello_msg.encode())
+            transport.write(hello_msg.encode() + b'\n')
             self.log_message(f"Connected to {contact_name}", "green")
         except Exception as e:
             self.log_message(f"Failed to connect to {contact_name}: {e}", "red")
@@ -316,9 +348,9 @@ class FrankChat(App):
             encrypted = self.crypto.encrypt(self.current_chat, message)
             msg = json.dumps({
                 "type": "message",
-                "content": encrypted.hex()
+                "content": encrypted
             })
-            protocol.transport.write(msg.encode())
+            protocol.transport.write(msg.encode() + b'\n')
             self.log_message(f"{self.username}: {message}", "green")
         
         else:
@@ -326,6 +358,15 @@ class FrankChat(App):
         
         self.message_input.value = ""
     
+    def action_paste_clipboard(self) -> None:
+        try:
+            text = subprocess.run(['pbpaste'], capture_output=True, text=True).stdout
+            text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', '')
+            self.message_input.value += text
+            self.message_input.focus()
+        except Exception:
+            pass
+
     async def on_unmount(self):
         if self.server:
             self.server.close()
