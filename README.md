@@ -2,6 +2,17 @@
 
 A secure, private terminal-based chat application for local network communication with an AIM-style interface.
 
+## Heterogeneous Cluster & OpenFOAM MPI
+
+This project runs on a heterogeneous compute cluster connected over Wi-Fi, used for CFD simulations with OpenFOAM. The cluster consists of mixed hardware (different CPU architectures and node specs) communicating over a local wireless network via MPI (Message Passing Interface).
+
+Key aspects of the setup:
+- **Nodes**: Multiple machines with differing hardware specs sharing a Wi-Fi subnet
+- **MPI**: OpenMPI coordinates parallel OpenFOAM solvers across nodes over the wireless LAN
+- **Domain decomposition**: OpenFOAM's `decomposePar` splits CFD meshes across nodes; `reconstructPar` merges results
+- **Clustering**: Custom CFD clustering scripts (see `cfd_cluster/`) automate node discovery, case distribution, and result aggregation
+- **Communication**: FrankChat provides a lightweight secure channel for node operators to coordinate during simulation runs
+
 ## Features
 
 - 🔒 End-to-end encryption using RSA
