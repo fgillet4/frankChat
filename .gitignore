@@ -1,1 +1,17 @@
 venv/
+
+# Encryption key — never commit this
+.chat_key
+
+# Local config with real IPs/credentials — use *.example.json as templates
+config.json
+devices.json
+cluster_profile.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
